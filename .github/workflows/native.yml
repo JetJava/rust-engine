@@ -1,0 +1,183 @@
+name: Native libraries
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-native:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            library: engine.dll
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            platform: windows-aarch64
+            library: engine.dll
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            library: libengine.so
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            library: libengine.so
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos-x86_64
+            library: libengine.dylib
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            platform: macos-aarch64
+            library: libengine.dylib
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --target ${{ matrix.target }}
+          rustup default 1.93.1
+
+      - name: Test native library
+        run: >-
+          cargo test --release --locked
+          --manifest-path rust-engine-native/Cargo.toml
+          --target ${{ matrix.target }}
+          --target-dir rust-engine-native/target/cargo
+
+      - name: Build native library
+        run: >-
+          cargo build --release --locked
+          --manifest-path rust-engine-native/Cargo.toml
+          --target ${{ matrix.target }}
+          --target-dir rust-engine-native/target/cargo
+
+      - name: Stage native resource
+        shell: pwsh
+        run: |
+          $destination = "native-artifact/META-INF/native/${{ matrix.platform }}"
+          New-Item -ItemType Directory -Force -Path $destination
+          Copy-Item -LiteralPath `
+            "rust-engine-native/target/cargo/${{ matrix.target }}/release/${{ matrix.library }}" `
+            -Destination $destination
+
+      - name: Upload native resource
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.platform }}
+          path: native-artifact
+          if-no-files-found: error
+
+  assemble:
+    name: Universal JAR
+    needs: build-native
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v7
+
+      - name: Download native resources
+        uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: rust-engine-native/target/generated-resources/native
+          merge-multiple: true
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      - name: Set project version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            mvn --batch-mode --no-transfer-progress \
+              org.codehaus.mojo:versions-maven-plugin:2.21.0:set \
+              -DnewVersion="${version}" \
+              -DgenerateBackupPoms=false \
+              -DprocessAllModules=true
+          fi
+
+          project_version=$(mvn help:evaluate \
+            -Dexpression=project.version \
+            -DforceStdout \
+            --quiet)
+          echo "PROJECT_VERSION=${project_version}" >> "${GITHUB_ENV}"
+
+      - name: Build project
+        run: >-
+          mvn --batch-mode --no-transfer-progress
+          -Drust.native.skipBuild=true
+          package
+
+      - name: Verify universal JAR
+        shell: pwsh
+        run: |
+          $jar = "rust-engine-native/target/rust-engine-native-$env:PROJECT_VERSION.jar"
+          $entries = jar tf $jar
+          $expected = @(
+            "META-INF/native/windows-x86_64/engine.dll",
+            "META-INF/native/windows-aarch64/engine.dll",
+            "META-INF/native/linux-x86_64/libengine.so",
+            "META-INF/native/linux-aarch64/libengine.so",
+            "META-INF/native/macos-x86_64/libengine.dylib",
+            "META-INF/native/macos-aarch64/libengine.dylib"
+          )
+
+          foreach ($entry in $expected) {
+            if ($entries -notcontains $entry) {
+              throw "Missing native resource: $entry"
+            }
+          }
+
+      - name: Upload universal JAR
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-engine-native-universal
+          path: rust-engine-native/target/rust-engine-native-${{ env.PROJECT_VERSION }}.jar
+          if-no-files-found: error
+
+      - name: Set up Maven Central
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_TOKEN
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Publish to Maven Central
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: >-
+          mvn --batch-mode --no-transfer-progress
+          -Pcentral
+          -Drust.native.skipBuild=true
+          -DskipTests
+          -Dcentral.autoPublish=true
+          -Dcentral.waitUntil=published
+          deploy

@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.jetjava</groupId>
+        <artifactId>rust-engine</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>rust-engine-native</artifactId>
+
+    <name>Rust Engine Native</name>
+    <description>Native Rust implementation packaged for all supported platforms.</description>
+
+    <properties>
+        <rust.native.platform>unsupported</rust.native.platform>
+        <rust.native.library>unsupported</rust.native.library>
+    </properties>
+
+    <build>
+        <resources>
+
+            <resource>
+                <directory>${project.build.directory}/generated-resources/native</directory>
+                <filtering>false</filtering>
+            </resource>
+
+        </resources>
+    </build>
+
+    <profiles>
+
+        <profile>
+            <id>central</id>
+            <properties>
+                <maven.javadoc.skip>true</maven.javadoc.skip>
+                <maven.source.skip>true</maven.source.skip>
+            </properties>
+            <build>
+                <plugins>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <version>3.4.1</version>
+                        <executions>
+
+                            <execution>
+                                <id>attach-rust-sources</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                                <configuration>
+                                    <classifier>sources</classifier>
+                                    <classesDirectory>${project.basedir}</classesDirectory>
+                                    <includes>
+                                        <include>Cargo.toml</include>
+                                        <include>Cargo.lock</include>
+                                        <include>src/**</include>
+                                    </includes>
+                                </configuration>
+                            </execution>
+
+                            <execution>
+                                <id>attach-native-javadocs</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                                <configuration>
+                                    <classifier>javadoc</classifier>
+                                    <classesDirectory>${project.basedir}/src/main/javadoc</classesDirectory>
+                                </configuration>
+                            </execution>
+
+                        </executions>
+                    </plugin>
+
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>build-host-native</id>
+            <activation>
+                <property>
+                    <name>!rust.native.skipBuild</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.6.3</version>
+                        <executions>
+
+                            <execution>
+                                <id>build-rust-library</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cargo</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>build</argument>
+                                        <argument>--release</argument>
+                                        <argument>--locked</argument>
+                                        <argument>--target-dir</argument>
+                                        <argument>${project.build.directory}/cargo</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+
+                            <execution>
+                                <id>test-rust-library</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>cargo</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>test</argument>
+                                        <argument>--release</argument>
+                                        <argument>--locked</argument>
+                                        <argument>--target-dir</argument>
+                                        <argument>${project.build.directory}/cargo</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+
+                            <execution>
+                                <id>stage-host-native-library</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>
+                                        ${project.build.directory}/generated-resources/native/META-INF/native/${rust.native.platform}
+                                    </outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.build.directory}/cargo/release</directory>
+                                            <filtering>false</filtering>
+                                            <includes>
+                                                <include>${rust.native.library}</include>
+                                            </includes>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+
+                        </executions>
+                    </plugin>
+
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>windows-x86_64</id>
+            <activation>
+                <os>
+                    <family>Windows</family>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <properties>
+                <rust.native.platform>windows-x86_64</rust.native.platform>
+                <rust.native.library>engine.dll</rust.native.library>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>windows-aarch64</id>
+            <activation>
+                <os>
+                    <family>Windows</family>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <rust.native.platform>windows-aarch64</rust.native.platform>
+                <rust.native.library>engine.dll</rust.native.library>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>linux-x86_64</id>
+            <activation>
+                <os>
+                    <name>Linux</name>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <properties>
+                <rust.native.platform>linux-x86_64</rust.native.platform>
+                <rust.native.library>libengine.so</rust.native.library>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>linux-aarch64</id>
+            <activation>
+                <os>
+                    <name>Linux</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <rust.native.platform>linux-aarch64</rust.native.platform>
+                <rust.native.library>libengine.so</rust.native.library>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>macos-x86_64</id>
+            <activation>
+                <os>
+                    <name>Mac OS X</name>
+                    <arch>x86_64</arch>
+                </os>
+            </activation>
+            <properties>
+                <rust.native.platform>macos-x86_64</rust.native.platform>
+                <rust.native.library>libengine.dylib</rust.native.library>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>macos-aarch64</id>
+            <activation>
+                <os>
+                    <name>Mac OS X</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <rust.native.platform>macos-aarch64</rust.native.platform>
+                <rust.native.library>libengine.dylib</rust.native.library>
+            </properties>
+        </profile>
+
+    </profiles>
+</project>

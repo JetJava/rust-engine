@@ -1,0 +1,12 @@
+[package]
+name = "rust-engine-native"
+version = "1.0.0"
+edition = "2024"
+description = "Native Rust implementation for the Rust Engine Java library"
+license = "Apache-2.0"
+repository = "https://github.com/JetJava/rust-engine"
+publish = false
+
+[lib]
+name = "engine"
+crate-type = ["cdylib"]
